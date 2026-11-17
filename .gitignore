@@ -1,0 +1,7 @@
+# Banco de dados local (criado ao rodar o sistema)
+*.db
+
+# Ambiente virtual e caches do Python
+.venv/
+__pycache__/
+.pytest_cache/
