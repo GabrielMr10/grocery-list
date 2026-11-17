@@ -26,6 +26,7 @@ class Item(BaseModel):
     id: int
     nome: str
     quantidade: int
+    preco: int  # preço unitário em centavos (D11, RNF04): 1250 = R$ 12,50
     comprado: bool
 
 
@@ -37,7 +38,7 @@ def conectar():
         conexao.execute("CREATE TABLE IF NOT EXISTS Lista (id INTEGER PRIMARY KEY, nome TEXT)")
         conexao.execute(
             "CREATE TABLE IF NOT EXISTS Item (id INTEGER PRIMARY KEY, nome TEXT, quantidade INTEGER,"
-            " comprado INTEGER, lista_id INTEGER REFERENCES Lista (id))"
+            " preco INTEGER, comprado INTEGER, lista_id INTEGER REFERENCES Lista (id))"
         )
         yield conexao
         conexao.commit()
@@ -72,15 +73,15 @@ def criar_lista(nome: str = Body(embed=True)) -> Lista:
 
 
 @app.post("/listas/{lista_id}/itens", status_code=201)
-def adicionar_item(lista_id: int, nome: str = Body(), quantidade: int = Body()) -> Item:
-    """UC02 Adicionar item: grava o item ligado à lista, marcado como não comprado (0)."""
+def adicionar_item(lista_id: int, nome: str = Body(), quantidade: int = Body(), preco: int = Body()) -> Item:
+    """UC02 Adicionar item: grava o item ligado à lista, com o preço em centavos, marcado como não comprado (0)."""
     with conectar() as conexao:
         conferir_lista(conexao, lista_id)
         id_gerado = conexao.execute(
-            "INSERT INTO Item (nome, quantidade, comprado, lista_id) VALUES (?, ?, 0, ?) RETURNING id",
-            (nome, quantidade, lista_id),
+            "INSERT INTO Item (nome, quantidade, preco, comprado, lista_id) VALUES (?, ?, ?, 0, ?) RETURNING id",
+            (nome, quantidade, preco, lista_id),
         ).fetchone()[0]
-    return Item(id=id_gerado, nome=nome, quantidade=quantidade, comprado=False)
+    return Item(id=id_gerado, nome=nome, quantidade=quantidade, preco=preco, comprado=False)
 
 
 @app.get("/listas")
@@ -97,22 +98,27 @@ def consultar_itens(lista_id: int) -> list[Item]:
     with conectar() as conexao:
         conferir_lista(conexao, lista_id)
         linhas = conexao.execute(
-            "SELECT id, nome, quantidade, comprado FROM Item WHERE lista_id = ? ORDER BY id", (lista_id,)
+            "SELECT id, nome, quantidade, preco, comprado FROM Item WHERE lista_id = ? ORDER BY id", (lista_id,)
         ).fetchall()
     # o banco guarda comprado como 0 ou 1; o modelo usa False ou True
-    return [Item(id=id_, nome=nome, quantidade=qtd, comprado=bool(comprado)) for id_, nome, qtd, comprado in linhas]
+    return [
+        Item(id=id_, nome=nome, quantidade=qtd, preco=preco, comprado=bool(comprado))
+        for id_, nome, qtd, preco, comprado in linhas
+    ]
 
 
 @app.put("/itens/{item_id}")
-def alterar_item(item_id: int, nome: str = Body(), quantidade: int = Body(), comprado: bool = Body()) -> Item:
-    """UC04 Alterar item: atualiza nome, quantidade e situação de compra no banco."""
+def alterar_item(
+    item_id: int, nome: str = Body(), quantidade: int = Body(), preco: int = Body(), comprado: bool = Body()
+) -> Item:
+    """UC04 Alterar item: atualiza nome, quantidade, preço e situação de compra no banco."""
     with conectar() as conexao:
         conferir_item(conexao, item_id)
         conexao.execute(
-            "UPDATE Item SET nome = ?, quantidade = ?, comprado = ? WHERE id = ?",
-            (nome, quantidade, int(comprado), item_id),
+            "UPDATE Item SET nome = ?, quantidade = ?, preco = ?, comprado = ? WHERE id = ?",
+            (nome, quantidade, preco, int(comprado), item_id),
         )
-    return Item(id=item_id, nome=nome, quantidade=quantidade, comprado=comprado)
+    return Item(id=item_id, nome=nome, quantidade=quantidade, preco=preco, comprado=comprado)
 
 
 @app.delete("/itens/{item_id}")
