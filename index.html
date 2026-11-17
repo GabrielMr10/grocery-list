@@ -5,10 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lista de Mercado</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
-    table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
-    th, td { border-bottom: 1px solid #ccc; padding: .3rem; text-align: left; }
-    #mensagem { font-weight: bold; }
+    /* RNF05: em tela estreita (360 px), os campos quebram linha em vez de sair da tela; nada de rolagem horizontal */
+    * { box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; max-width: 760px; margin: 1rem auto; padding: 0 1rem; overflow-wrap: anywhere; }
+    input, button { font: inherit; padding: .3rem; min-width: 0; }
+    form, .item { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+    .item { border-bottom: 1px solid #ccc; padding: .5rem 0; }
+    .nome { flex: 1 1 10rem; }
+    .numero { width: 6rem; }
+    #mensagem, #total { font-weight: bold; }
   </style>
 </head>
 <body>
@@ -18,7 +23,7 @@
   <h2>Listas</h2>
   <!-- UC01: criar uma lista nova -->
   <form id="form-lista">
-    <input id="nome-lista" placeholder="Nome da nova lista">
+    <input id="nome-lista" class="nome" placeholder="Nome da nova lista">
     <button>Criar lista</button>
   </form>
   <!-- UC03: listas cadastradas; clique em uma para ver os itens -->
@@ -26,22 +31,33 @@
 
   <div id="area-itens" hidden>
     <h2 id="titulo-itens"></h2>
-    <!-- UC02: adicionar um item à lista escolhida -->
+    <!-- UC02: adicionar um item à lista escolhida, com o preço em reais -->
     <form id="form-item">
-      <input id="nome-item" placeholder="Nome do item">
-      <input id="quantidade-item" type="number" value="1">
+      <input id="nome-item" class="nome" placeholder="Nome do item">
+      <label>Qtd. <input id="quantidade-item" class="numero" type="number" value="1"></label>
+      <label>Preço <input id="preco-item" class="numero" inputmode="decimal" placeholder="0,00"></label>
       <button>Adicionar item</button>
     </form>
     <!-- UC03: itens da lista escolhida; em cada um, Alterar (UC04) e Excluir (UC05) -->
-    <table>
-      <thead><tr><th>Item</th><th>Quantidade</th><th>Comprado</th><th></th></tr></thead>
-      <tbody id="itens"></tbody>
-    </table>
+    <div id="itens"></div>
+    <!-- RF08: total da lista, atualizado depois de cada inclusão, alteração ou exclusão -->
+    <p id="total"></p>
   </div>
 
   <script>
     let listaEscolhida = null;
     const mensagem = (texto) => { document.getElementById("mensagem").textContent = texto; };
+
+    // D13: só a página converte entre reais (o que a pessoa digita e vê) e centavos (o que o sistema e o banco guardam).
+    // Aceita vírgula ou ponto e o "R$" na frente. Multiplica por 100 e arredonda: 0,29 × 100 dá 28,999999999999996 → 29.
+    function reaisParaCentavos(texto) {
+      return Math.round(Number(texto.replace("R$", "").replace(",", ".")) * 100);
+    }
+
+    // Centavos para reais na tela: 1250 → "R$ 12,50".
+    function centavosParaReais(centavos) {
+      return "R$ " + (centavos / 100).toFixed(2).replace(".", ",");
+    }
 
     // Chama uma rota do sistema; se der erro (por exemplo, 404), mostra a mensagem e para.
     async function chamar(metodo, caminho, corpo) {
@@ -63,6 +79,13 @@
       return Object.assign(document.createElement(tipo), propriedades);
     }
 
+    // Põe um campo dentro de um rótulo, como "Qtd. [6]".
+    function rotulo(texto, campo) {
+      const label = elemento("label", { textContent: texto + " " });
+      label.append(campo);
+      return label;
+    }
+
     // UC03 (1ª rota): pede as listas e mostra cada uma como um botão.
     async function mostrarListas() {
       const ul = document.getElementById("listas");
@@ -74,43 +97,39 @@
       }
     }
 
-    // UC03 (2ª rota): pede os itens da lista escolhida e mostra cada um.
+    // UC03 (2ª rota): pede os itens da lista escolhida e o total, e mostra os dois (RF08).
     async function escolherLista(lista) {
       listaEscolhida = lista;
       document.getElementById("area-itens").hidden = false;
       document.getElementById("titulo-itens").textContent = "Itens de " + lista.nome;
-      const tbody = document.getElementById("itens");
-      tbody.replaceChildren();
-      for (const item of await chamar("GET", `/listas/${lista.id}/itens`)) {
-        tbody.append(linhaDoItem(item));
-      }
+      const { itens, total } = await chamar("GET", `/listas/${lista.id}/itens`);
+      document.getElementById("itens").replaceChildren(...itens.map(linhaDoItem));
+      document.getElementById("total").textContent = "Total da lista: " + centavosParaReais(total);
     }
 
-    // Monta a linha de um item: campos editáveis e os botões Alterar (UC04) e Excluir (UC05).
+    // Monta a linha de um item: campos editáveis (o preço em reais) e os botões Alterar (UC04) e Excluir (UC05).
     function linhaDoItem(item) {
-      const nome = elemento("input", { value: item.nome });
-      const quantidade = elemento("input", { type: "number", value: item.quantidade });
+      const nome = elemento("input", { value: item.nome, className: "nome" });
+      const quantidade = elemento("input", { type: "number", value: item.quantidade, className: "numero" });
+      const preco = elemento("input", { value: centavosParaReais(item.preco), className: "numero", inputMode: "decimal" });
       const comprado = elemento("input", { type: "checkbox", checked: item.comprado });
-      // UC04: envia o item com as mudanças e mostra o item atualizado.
+      // UC04: envia o item com as mudanças, mostra o item atualizado e consulta de novo a lista e o total.
       const alterar = elemento("button", { textContent: "Alterar", onclick: async () => {
-        const atualizado = await chamar("PUT", `/itens/${item.id}`,
-          { nome: nome.value, quantidade: Number(quantidade.value), comprado: comprado.checked });
+        const atualizado = await chamar("PUT", `/itens/${item.id}`, {
+          nome: nome.value, quantidade: Number(quantidade.value),
+          preco: reaisParaCentavos(preco.value), comprado: comprado.checked,
+        });
         mensagem("Item atualizado: " + atualizado.nome);
         escolherLista(listaEscolhida);
       } });
-      // UC05: pede a exclusão e mostra a confirmação.
+      // UC05: pede a exclusão, mostra a confirmação e consulta de novo a lista e o total.
       const excluir = elemento("button", { textContent: "Excluir", onclick: async () => {
         mensagem((await chamar("DELETE", `/itens/${item.id}`)).mensagem);
         escolherLista(listaEscolhida);
       } });
-      const tr = elemento("tr", {});
-      for (const campo of [nome, quantidade, comprado]) {
-        tr.append(elemento("td", {}));
-        tr.lastChild.append(campo);
-      }
-      tr.append(elemento("td", {}));
-      tr.lastChild.append(alterar, " ", excluir);
-      return tr;
+      const linha = elemento("div", { className: "item" });
+      linha.append(nome, rotulo("Qtd.", quantidade), rotulo("Preço", preco), rotulo("Comprado", comprado), alterar, excluir);
+      return linha;
     }
 
     // UC01: cria a lista e mostra a lista criada.
@@ -124,14 +143,16 @@
       escolherLista(lista);
     };
 
-    // UC02: adiciona o item à lista escolhida e mostra o item criado.
+    // UC02: adiciona o item à lista escolhida, mostra o item criado e consulta de novo a lista e o total.
     document.getElementById("form-item").onsubmit = async (evento) => {
       evento.preventDefault();
       const nome = document.getElementById("nome-item");
       const quantidade = document.getElementById("quantidade-item");
+      const preco = document.getElementById("preco-item");
       const item = await chamar("POST", `/listas/${listaEscolhida.id}/itens`,
-        { nome: nome.value, quantidade: Number(quantidade.value) });
+        { nome: nome.value, quantidade: Number(quantidade.value), preco: reaisParaCentavos(preco.value) });
       nome.value = "";
+      preco.value = "";
       mensagem("Item adicionado: " + item.nome);
       escolherLista(listaEscolhida);
     };
