@@ -93,18 +93,23 @@ def consultar_listas() -> list[Lista]:
 
 
 @app.get("/listas/{lista_id}/itens")
-def consultar_itens(lista_id: int) -> list[Item]:
-    """UC03 Consultar lista (2ª rota): busca os itens da lista escolhida."""
+def consultar_itens(lista_id: int) -> dict:
+    """UC03 Consultar lista (2ª rota): busca os itens da lista escolhida e o total (RF08), calculado pelo banco."""
     with conectar() as conexao:
         conferir_lista(conexao, lista_id)
         linhas = conexao.execute(
             "SELECT id, nome, quantidade, preco, comprado FROM Item WHERE lista_id = ? ORDER BY id", (lista_id,)
         ).fetchall()
+        # soma de preço × quantidade de todos os itens, comprados ou não; sem itens, a soma é nula e o COALESCE dá 0
+        total = conexao.execute(
+            "SELECT COALESCE(SUM(preco * quantidade), 0) FROM Item WHERE lista_id = ?", (lista_id,)
+        ).fetchone()[0]
     # o banco guarda comprado como 0 ou 1; o modelo usa False ou True
-    return [
+    itens = [
         Item(id=id_, nome=nome, quantidade=qtd, preco=preco, comprado=bool(comprado))
         for id_, nome, qtd, preco, comprado in linhas
     ]
+    return {"itens": itens, "total": total}
 
 
 @app.put("/itens/{item_id}")

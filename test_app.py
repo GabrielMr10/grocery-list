@@ -1,4 +1,5 @@
-"""Testes da Lista de Mercado: UC01 a UC05 (com o preço do item, D11), caminho ruim (404), RF07 e a página (RNF03).
+"""Testes da Lista de Mercado: UC01 a UC05 (com o preço do item, D11), total da lista (RF08, RNF04),
+caminho ruim (404), RF07 e a página (RNF03).
 
 Cada teste usa um arquivo .db temporário (pasta tmp_path do pytest), nunca o banco real.
 """
@@ -72,7 +73,10 @@ def test_uc03_consultar_lista(cliente):
     assert cliente.get("/listas").json() == [{"id": 1, "nome": "Feira"}, {"id": 2, "nome": "Mercado"}]
     resposta = cliente.get("/listas/2/itens")
     assert resposta.status_code == 200
-    assert resposta.json() == [{"id": 2, "nome": "Arroz", "quantidade": 1, "preco": 2599, "comprado": False}]
+    assert resposta.json() == {
+        "itens": [{"id": 2, "nome": "Arroz", "quantidade": 1, "preco": 2599, "comprado": False}],
+        "total": 2599,
+    }
 
 
 def test_uc04_alterar_item(cliente, banco):
@@ -97,6 +101,33 @@ def test_uc05_excluir_item(cliente, banco):
     assert resposta.status_code == 200
     assert resposta.json() == {"mensagem": "Item excluído."}
     assert no_banco(banco, "SELECT * FROM Item") == []
+
+
+# ---------------------------------------------------------------- total da lista (RF08, RNF04)
+
+def test_rf08_total_e_a_soma_de_preco_vezes_quantidade(cliente):
+    cliente.post("/listas", json={"nome": "Feira"})
+    cliente.post("/listas", json={"nome": "Mercado"})
+    cliente.post("/listas/1/itens", json={"nome": "Banana", "quantidade": 6, "preco": 450})
+    cliente.post("/listas/1/itens", json={"nome": "Arroz", "quantidade": 2, "preco": 2599})
+    cliente.post("/listas/2/itens", json={"nome": "Café", "quantidade": 1, "preco": 1890})  # outra lista: não entra
+    # item comprado continua no total ("comprados ou não")
+    cliente.put("/itens/2", json={"nome": "Arroz", "quantidade": 2, "preco": 2599, "comprado": True})
+    # 6 × 450 + 2 × 2599 = 2700 + 5198 = 7898 centavos (R$ 78,98)
+    assert cliente.get("/listas/1/itens").json()["total"] == 7898
+
+
+def test_rnf04_dez_centavos_vezes_tres_da_trinta(cliente):
+    cliente.post("/listas", json={"nome": "Feira"})
+    cliente.post("/listas/1/itens", json={"nome": "Bala", "quantidade": 3, "preco": 10})
+    total = cliente.get("/listas/1/itens").json()["total"]
+    assert total == 30  # R$ 0,30 exato (em float, 0.10 * 3 daria 0.30000000000000004)
+    assert type(total) is int
+
+
+def test_rf08_lista_sem_itens_tem_total_zero(cliente):
+    cliente.post("/listas", json={"nome": "Feira"})
+    assert cliente.get("/listas/1/itens").json() == {"itens": [], "total": 0}
 
 
 # ---------------------------------------------------------------- caminho ruim (404)
@@ -135,9 +166,10 @@ def test_rf07_dados_continuam_depois_de_reiniciar(banco, monkeypatch):
     monkeypatch.setattr(novo, "CAMINHO_BANCO", banco)
     with TestClient(novo.app) as cliente:
         assert cliente.get("/listas").json() == [{"id": 1, "nome": "Feira"}]
-        assert cliente.get("/listas/1/itens").json() == [
-            {"id": 1, "nome": "Banana", "quantidade": 6, "preco": 450, "comprado": False}
-        ]
+        assert cliente.get("/listas/1/itens").json() == {
+            "itens": [{"id": 1, "nome": "Banana", "quantidade": 6, "preco": 450, "comprado": False}],
+            "total": 2700,
+        }
 
 
 def test_rnf03_pagina_unica(cliente):
