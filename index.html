@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lista de Mercado</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: .5rem; }
+    th, td { border-bottom: 1px solid #ccc; padding: .3rem; text-align: left; }
+    #mensagem { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Lista de Mercado</h1>
+  <p id="mensagem"></p>
+
+  <h2>Listas</h2>
+  <!-- UC01: criar uma lista nova -->
+  <form id="form-lista">
+    <input id="nome-lista" placeholder="Nome da nova lista">
+    <button>Criar lista</button>
+  </form>
+  <!-- UC03: listas cadastradas; clique em uma para ver os itens -->
+  <ul id="listas"></ul>
+
+  <div id="area-itens" hidden>
+    <h2 id="titulo-itens"></h2>
+    <!-- UC02: adicionar um item à lista escolhida -->
+    <form id="form-item">
+      <input id="nome-item" placeholder="Nome do item">
+      <input id="quantidade-item" type="number" value="1">
+      <button>Adicionar item</button>
+    </form>
+    <!-- UC03: itens da lista escolhida; em cada um, Alterar (UC04) e Excluir (UC05) -->
+    <table>
+      <thead><tr><th>Item</th><th>Quantidade</th><th>Comprado</th><th></th></tr></thead>
+      <tbody id="itens"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let listaEscolhida = null;
+    const mensagem = (texto) => { document.getElementById("mensagem").textContent = texto; };
+
+    // Chama uma rota do sistema; se der erro (por exemplo, 404), mostra a mensagem e para.
+    async function chamar(metodo, caminho, corpo) {
+      const resposta = await fetch(caminho, {
+        method: metodo,
+        headers: { "Content-Type": "application/json" },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+      });
+      const dados = await resposta.json();
+      if (!resposta.ok) {
+        mensagem(dados.detail);
+        throw new Error(dados.detail);
+      }
+      return dados;
+    }
+
+    // Cria um elemento da página; o texto entra com textContent, então nunca vira HTML.
+    function elemento(tipo, propriedades) {
+      return Object.assign(document.createElement(tipo), propriedades);
+    }
+
+    // UC03 (1ª rota): pede as listas e mostra cada uma como um botão.
+    async function mostrarListas() {
+      const ul = document.getElementById("listas");
+      ul.replaceChildren();
+      for (const lista of await chamar("GET", "/listas")) {
+        const botao = elemento("button", { textContent: lista.nome, onclick: () => escolherLista(lista) });
+        ul.append(elemento("li", {}));
+        ul.lastChild.append(botao);
+      }
+    }
+
+    // UC03 (2ª rota): pede os itens da lista escolhida e mostra cada um.
+    async function escolherLista(lista) {
+      listaEscolhida = lista;
+      document.getElementById("area-itens").hidden = false;
+      document.getElementById("titulo-itens").textContent = "Itens de " + lista.nome;
+      const tbody = document.getElementById("itens");
+      tbody.replaceChildren();
+      for (const item of await chamar("GET", `/listas/${lista.id}/itens`)) {
+        tbody.append(linhaDoItem(item));
+      }
+    }
+
+    // Monta a linha de um item: campos editáveis e os botões Alterar (UC04) e Excluir (UC05).
+    function linhaDoItem(item) {
+      const nome = elemento("input", { value: item.nome });
+      const quantidade = elemento("input", { type: "number", value: item.quantidade });
+      const comprado = elemento("input", { type: "checkbox", checked: item.comprado });
+      // UC04: envia o item com as mudanças e mostra o item atualizado.
+      const alterar = elemento("button", { textContent: "Alterar", onclick: async () => {
+        const atualizado = await chamar("PUT", `/itens/${item.id}`,
+          { nome: nome.value, quantidade: Number(quantidade.value), comprado: comprado.checked });
+        mensagem("Item atualizado: " + atualizado.nome);
+        escolherLista(listaEscolhida);
+      } });
+      // UC05: pede a exclusão e mostra a confirmação.
+      const excluir = elemento("button", { textContent: "Excluir", onclick: async () => {
+        mensagem((await chamar("DELETE", `/itens/${item.id}`)).mensagem);
+        escolherLista(listaEscolhida);
+      } });
+      const tr = elemento("tr", {});
+      for (const campo of [nome, quantidade, comprado]) {
+        tr.append(elemento("td", {}));
+        tr.lastChild.append(campo);
+      }
+      tr.append(elemento("td", {}));
+      tr.lastChild.append(alterar, " ", excluir);
+      return tr;
+    }
+
+    // UC01: cria a lista e mostra a lista criada.
+    document.getElementById("form-lista").onsubmit = async (evento) => {
+      evento.preventDefault();
+      const campo = document.getElementById("nome-lista");
+      const lista = await chamar("POST", "/listas", { nome: campo.value });
+      campo.value = "";
+      mensagem("Lista criada: " + lista.nome);
+      await mostrarListas();
+      escolherLista(lista);
+    };
+
+    // UC02: adiciona o item à lista escolhida e mostra o item criado.
+    document.getElementById("form-item").onsubmit = async (evento) => {
+      evento.preventDefault();
+      const nome = document.getElementById("nome-item");
+      const quantidade = document.getElementById("quantidade-item");
+      const item = await chamar("POST", `/listas/${listaEscolhida.id}/itens`,
+        { nome: nome.value, quantidade: Number(quantidade.value) });
+      nome.value = "";
+      mensagem("Item adicionado: " + item.nome);
+      escolherLista(listaEscolhida);
+    };
+
+    mostrarListas();
+  </script>
+</body>
+</html>
